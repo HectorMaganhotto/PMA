@@ -38,19 +38,24 @@ async def fetch_markets() -> List[Dict[str, Any]]:
     return markets
 
 
-def hours_left(row: Dict[str, Any]) -> float:
-    """Return remaining hours until market resolution or -1 if unknown."""
-    date_str = row.get("endDate") or row.get("endsAt") or row.get("expiry")
+def hours_to_expiry(date_str: str | None) -> float:
+    """Return remaining hours until the given ISO date or -1 if invalid."""
     if not isinstance(date_str, str) or not date_str:
         return -1.0
     try:
         dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-    except ValueError:
+    except Exception:
         return -1.0
     delta = dt - datetime.now(timezone.utc)
     return round(delta.total_seconds() / 3600, 2)
+
+
+def hours_left(row: Dict[str, Any]) -> float:
+    """Return remaining hours until market resolution or -1 if unknown."""
+    date_str = row.get("endDate") or row.get("endsAt") or row.get("expiry")
+    return hours_to_expiry(date_str)
 
 
 def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
@@ -122,6 +127,9 @@ def load_dataframe() -> pd.DataFrame:
     """Load and normalize markets into a DataFrame."""
     markets = asyncio.run(fetch_markets())
     df = pd.DataFrame(markets)
+    for col in ["yesPrice", "noPrice", "openInterest"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     return normalize_dataframe(df)
 
 
