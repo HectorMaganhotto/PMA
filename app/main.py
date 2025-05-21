@@ -44,7 +44,7 @@ def hours_to_expiry(market: Dict[str, Any]) -> float:
         market.get("endsAt")
         or market.get("endDate")
         or market.get("expiry"))
-    if not date_str:
+    if not isinstance(date_str, str) or not date_str:
         return 0.0
     try:
         dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
