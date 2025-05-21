@@ -79,6 +79,8 @@ def main() -> None:
         st.info("No market data available.")
         return
 
+    st.write(f"Total markets available: {len(df)}")
+
     df_filtered = df.copy()
     if "yesPrice" in df_filtered.columns and "noPrice" in df_filtered.columns:
         prob_col = df_filtered[["yesPrice", "noPrice"]].max(axis=1)
