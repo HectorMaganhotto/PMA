@@ -44,7 +44,7 @@ def hours_to_expiry(market: Dict[str, Any]) -> float:
         market.get("endsAt")
         or market.get("endDate")
         or market.get("expiry"))
-    if not date_str:
+    if not isinstance(date_str, str) or not date_str:
         return 0.0
     try:
         dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
@@ -55,12 +55,41 @@ def hours_to_expiry(market: Dict[str, Any]) -> float:
 
 
 def load_dataframe() -> pd.DataFrame:
-    """Load markets into a DataFrame with computed columns."""
+    """Load markets and compute helper columns."""
     markets = asyncio.run(fetch_markets())
     df = pd.DataFrame(markets)
-    if not df.empty:
-        df["hoursToExpiry"] = df.apply(hours_to_expiry, axis=1)
+    if df.empty:
+        return df
+
+    if "yesPrice" in df.columns and "noPrice" in df.columns:
+        df["probability"] = df[["yesPrice", "noPrice"]].max(axis=1, skipna=True)
+    elif "yesPrice" in df.columns:
+        df["probability"] = df["yesPrice"]
+    elif "noPrice" in df.columns:
+        df["probability"] = df["noPrice"]
+
+    df["hoursToExpiry"] = df.apply(hours_to_expiry, axis=1)
     return df
+
+
+def filter_dataframe(
+    df: pd.DataFrame,
+    min_prob: float,
+    min_hours: float,
+    min_open_interest: float,
+) -> pd.DataFrame:
+    """Return df filtered by the supplied criteria."""
+    if df.empty:
+        return df
+
+    mask = pd.Series(True, index=df.index)
+    if "probability" in df.columns:
+        mask &= df["probability"] >= min_prob
+    if "hoursToExpiry" in df.columns:
+        mask &= df["hoursToExpiry"] >= min_hours
+    if "openInterest" in df.columns:
+        mask &= df["openInterest"] >= min_open_interest
+    return df[mask]
 
 
 def main() -> None:
@@ -79,20 +108,14 @@ def main() -> None:
         st.info("No market data available.")
         return
 
-    df_filtered = df.copy()
-    if "yesPrice" in df_filtered.columns and "noPrice" in df_filtered.columns:
-        prob_col = df_filtered[["yesPrice", "noPrice"]].max(axis=1)
-        df_filtered = df_filtered[prob_col >= min_prob]
+    st.write(f"Total markets loaded: {len(df)}")
 
-    if "hoursToExpiry" in df_filtered.columns:
-        df_filtered = df_filtered[df_filtered["hoursToExpiry"] >= min_hours]
-
-    if "openInterest" in df_filtered.columns:
-        df_filtered = df_filtered[df_filtered["openInterest"] >= min_open_interest]
+    df_filtered = filter_dataframe(df, min_prob, min_hours, min_open_interest)
+    st.write(f"Markets after filters: {len(df_filtered)}")
 
     columns = [
         col
-        for col in ["question", "yesPrice", "noPrice", "openInterest", "hoursToExpiry"]
+        for col in ["question", "yesPrice", "noPrice", "probability", "hoursToExpiry", "openInterest"]
         if col in df_filtered.columns
     ]
     st.dataframe(df_filtered[columns])
