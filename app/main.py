@@ -44,7 +44,7 @@ def hours_to_expiry(market: Dict[str, Any]) -> float:
         market.get("endsAt")
         or market.get("endDate")
         or market.get("expiry"))
-    if not date_str:
+    if not isinstance(date_str, str) or not date_str:
         return 0.0
     try:
         dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
@@ -78,6 +78,8 @@ def main() -> None:
     if df.empty:
         st.info("No market data available.")
         return
+
+    st.write(f"Total markets available: {len(df)}")
 
     df_filtered = df.copy()
     if "yesPrice" in df_filtered.columns and "noPrice" in df_filtered.columns:
