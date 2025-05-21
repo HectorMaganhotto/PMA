@@ -17,3 +17,5 @@ streamlit run app/main.py
 ```
 
 The app fetches market data asynchronously and caches results in memory for 60 seconds to avoid excessive API calls.
+
+# User-provided custom instructions
