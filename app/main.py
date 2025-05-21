@@ -44,7 +44,7 @@ def hours_to_expiry(market: Dict[str, Any]) -> float:
         market.get("endsAt")
         or market.get("endDate")
         or market.get("expiry"))
-    if not date_str:
+    if not isinstance(date_str, str) or not date_str:
         return 0.0
     try:
         dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
@@ -60,6 +60,19 @@ def load_dataframe() -> pd.DataFrame:
     df = pd.DataFrame(markets)
     if not df.empty:
         df["hoursToExpiry"] = df.apply(hours_to_expiry, axis=1)
+        yes = (
+            pd.to_numeric(df["yesPrice"], errors="coerce")
+            if "yesPrice" in df.columns
+            else None
+        )
+        no = (
+            pd.to_numeric(df["noPrice"], errors="coerce")
+            if "noPrice" in df.columns
+            else None
+        )
+        cols = [c for c in [yes, no] if c is not None]
+        if cols:
+            df["probability"] = pd.concat(cols, axis=1).max(axis=1, skipna=True)
     return df
 
 
@@ -78,11 +91,11 @@ def main() -> None:
     if df.empty:
         st.info("No market data available.")
         return
+    st.write(f"Total current available markets: {len(df)}")
 
     df_filtered = df.copy()
-    if "yesPrice" in df_filtered.columns and "noPrice" in df_filtered.columns:
-        prob_col = df_filtered[["yesPrice", "noPrice"]].max(axis=1)
-        df_filtered = df_filtered[prob_col >= min_prob]
+    if "probability" in df_filtered.columns:
+        df_filtered = df_filtered[df_filtered["probability"] >= min_prob]
 
     if "hoursToExpiry" in df_filtered.columns:
         df_filtered = df_filtered[df_filtered["hoursToExpiry"] >= min_hours]
@@ -92,7 +105,14 @@ def main() -> None:
 
     columns = [
         col
-        for col in ["question", "yesPrice", "noPrice", "openInterest", "hoursToExpiry"]
+        for col in [
+            "question",
+            "yesPrice",
+            "noPrice",
+            "probability",
+            "hoursToExpiry",
+            "openInterest",
+        ]
         if col in df_filtered.columns
     ]
     st.dataframe(df_filtered[columns])
