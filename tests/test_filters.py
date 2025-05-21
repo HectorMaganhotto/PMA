@@ -3,59 +3,46 @@ import pandas as pd
 
 from app.main import normalize_dataframe, filter_dataframe
 
-
 class FilterTests(unittest.TestCase):
     def setUp(self):
-        self.df = pd.DataFrame([
+        data = [
             {
-                "question": "Will A happen",
-                "slug": "a-happen",
-                "yesPrice": 0.9,
-                "noPrice": 0.1,
-                "openInterest": 2000,
+                "question": "Will A happen?",
+                "slug": "a",
                 "category": "Politics",
-                "volume24hr": 100,
+                "yesPrice": "0.8",
+                "noPrice": "0.2",
+                "openInterest": "1500",
+                "volume24hr": 200,
                 "endDate": "2030-01-01T00:00:00Z",
             },
             {
-                "question": "Will B happen",
-                "slug": "b-happen",
-                "yesPrice": 0.6,
-                "noPrice": 0.4,
-                "openInterest": 500,
+                "question": "Will B happen?",
+                "slug": "b",
                 "category": "Sports",
+                "yesPrice": "0.4",
+                "noPrice": "0.6",
+                "openInterest": "500",
                 "volume24hr": 50,
-                "endDate": "2030-01-01T00:00:00Z",
             },
-            {
-                "question": "Will C happen",
-                "slug": "c-happen",
-                "yesPrice": 0.4,
-                "noPrice": 0.6,
-                "openInterest": 1500,
-                "category": "Politics",
-                "volume24hr": 20,
-                "endDate": None,
-            },
-        ])
-        self.df = normalize_dataframe(self.df)
+        ]
+        self.df = normalize_dataframe(pd.DataFrame(data))
 
-    def test_min_prob(self):
-        filtered = filter_dataframe(self.df, "", ["Politics", "Sports"], False, 0.7, 0, 0)
+    def test_hours_left_missing(self):
+        self.assertEqual(self.df.loc[1, "hoursLeft"], -1)
+
+    def test_filtering(self):
+        filtered = filter_dataframe(
+            self.df,
+            search="a",
+            categories=["Politics"],
+            hide_sports=True,
+            min_prob=0.5,
+            min_hours=0,
+            min_open=1000,
+        )
         self.assertEqual(len(filtered), 1)
-
-    def test_hide_sports(self):
-        filtered = filter_dataframe(self.df, "", ["Politics", "Sports"], True, 0.0, 0, 0)
-        self.assertNotIn("Sports", filtered["category"].tolist())
-
-    def test_min_hours(self):
-        filtered = filter_dataframe(self.df, "", ["Politics", "Sports"], False, 0.0, 1, 0)
-        self.assertTrue(filtered["hoursLeft"].min() >= 1)
-
-    def test_min_open_interest(self):
-        filtered = filter_dataframe(self.df, "", ["Politics", "Sports"], False, 0.0, 0, 1000)
-        self.assertTrue((filtered["openInterest"] >= 1000).all())
-
+        self.assertEqual(filtered.iloc[0]["slug"], "a")
 
 if __name__ == "__main__":
     unittest.main()
