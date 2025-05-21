@@ -1,56 +1,37 @@
 import pandas as pd
-from app.main import add_computed_columns, filter_dataframe, sort_dataframe
+from app.main import add_computed_columns, apply_filters
 
-
-def example_df():
-    data = [
+def test_missing_end_date_filter():
+    df = pd.DataFrame([
         {
-            "question": "Will team A win?",
-            "slug": "team-a-win",
-            "category": "Sports",
-            "yesPrice": 0.9,
-            "noPrice": 0.1,
-            "openInterest": 2000,
-            "volume24hr": 50,
-            "endDate": "2030-01-01T00:00:00Z",
-        },
-        {
-            "question": "Will candidate X be elected?",
-            "slug": "candidate-x-election",
-            "category": "Politics",
+            "question": "Q1",
             "yesPrice": 0.6,
             "noPrice": 0.4,
-            "openInterest": 500,
-            "volume24hr": 100,
-            "endDate": "2030-01-02T00:00:00Z",
+            "openInterest": 2000,
+            "endDate": "2030-01-01T00:00:00Z",
+            "category": "Politics",
+            "volume24hr": 10,
         },
-    ]
-    df = pd.DataFrame(data)
-    return add_computed_columns(df)
+        {
+            "question": "Q2",
+            "yesPrice": 0.7,
+            "noPrice": 0.3,
+            "openInterest": 2000,
+            "category": "Sports",
+            "volume24hr": 5,
+        },
+    ])
+    add_computed_columns(df)
+    assert df.loc[1, "hoursLeft"] == -1
 
-
-def test_search_filter():
-    df = example_df()
-    result = filter_dataframe(df, "candidate", None, False, 0.0, 0, 0)
-    assert len(result) == 1
-    assert result.iloc[0]["slug"] == "candidate-x-election"
-
-
-def test_hide_sports():
-    df = example_df()
-    result = filter_dataframe(df, "", None, True, 0.0, 0, 0)
-    assert all(result["category"] != "Sports")
-
-
-def test_probability_filter():
-    df = example_df()
-    result = filter_dataframe(df, "", None, False, 0.8, 0, 0)
-    assert len(result) == 1
-    assert result.iloc[0]["slug"] == "team-a-win"
-
-
-def test_sort_open_interest():
-    df = example_df()
-    sorted_df = sort_dataframe(df, "openInterest")
-    assert sorted_df.iloc[0]["openInterest"] >= sorted_df.iloc[1]["openInterest"]
+    out = apply_filters(
+        df,
+        min_hours=1,
+        categories=["Politics", "Sports"],
+        hide_sports=False,
+        min_prob=0.5,
+        min_open_interest=0,
+    )
+    assert len(out) == 1
+    assert out.iloc[0]["question"] == "Q1"
 

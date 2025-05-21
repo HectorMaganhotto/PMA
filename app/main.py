@@ -1,7 +1,7 @@
 import asyncio
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Iterable
+from typing import Any, Dict, List, Sequence
 
 import httpx
 import pandas as pd
@@ -38,107 +38,100 @@ async def fetch_markets() -> List[Dict[str, Any]]:
     return markets
 
 
-def hours_to_expiry(market: Dict[str, Any]) -> float:
-    """Return the remaining hours until market resolution."""
+def hours_left(row: Dict[str, Any]) -> float:
+    """Return the remaining hours until market resolution.
+
+    Accepts ISO strings with or without ``Z``. If parsing fails, returns ``-1``.
+    """
     date_str = (
-        market.get("endsAt")
-        or market.get("endDate")
-        or market.get("expiry"))
+        row.get("endsAt")
+        or row.get("endDate")
+        or row.get("expiry"))
     if not isinstance(date_str, str) or not date_str:
-        return 0.0
+        return -1.0
     try:
-        dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        if date_str.endswith("Z"):
+            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        else:
+            dt = datetime.fromisoformat(date_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
     except ValueError:
-        return 0.0
+        return -1.0
+
     delta = dt - datetime.now(timezone.utc)
     return round(delta.total_seconds() / 3600, 2)
-
-
-def add_computed_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Return a copy of ``df`` with ``probability`` and ``hoursLeft`` columns."""
-    result = df.copy()
-    if {"yesPrice", "noPrice"}.issubset(result.columns):
-        result["probability"] = result[["yesPrice", "noPrice"]].max(axis=1, skipna=True)
-    else:
-        result["probability"] = pd.NA
-    result["hoursLeft"] = result.apply(hours_to_expiry, axis=1)
-    return result
-
-
-def filter_dataframe(
-    df: pd.DataFrame,
-    search: str,
-    categories: Iterable[str] | None,
-    hide_sports: bool,
-    min_prob: float,
-    min_hours: int,
-    min_open: int,
-) -> pd.DataFrame:
-    """Filter ``df`` according to sidebar controls."""
-    result = df.copy()
-
-    if search:
-        text = search.lower()
-        q_match = result["question"].str.contains(text, case=False, na=False) if "question" in result.columns else False
-        slug_match = result.get("slug", pd.Series(""))
-        if isinstance(slug_match, pd.Series):
-            slug_match = slug_match.str.contains(text, case=False, na=False)
-        else:
-            slug_match = False
-        result = result[q_match | slug_match]
-
-    if hide_sports and "category" in result.columns:
-        result = result[~result["category"].str.contains("sports", case=False, na=False)]
-
-    if categories and "category" in result.columns and "All" not in categories:
-        result = result[result["category"].isin(categories)]
-
-    if "probability" in result.columns:
-        result = result[result["probability"] >= min_prob]
-
-    if "hoursLeft" in result.columns:
-        result = result[result["hoursLeft"] >= min_hours]
-
-    if "openInterest" in result.columns:
-        result = result[result["openInterest"] >= min_open]
-
-    return result
-
-
-def sort_dataframe(df: pd.DataFrame, option: str) -> pd.DataFrame:
-    """Sort ``df`` according to the selected option."""
-    if option == "24h volume" and "volume24hr" in df.columns:
-        return df.sort_values("volume24hr", ascending=False)
-    if option == "openInterest" and "openInterest" in df.columns:
-        return df.sort_values("openInterest", ascending=False)
-
-    date_col = None
-    for col in ("endDate", "endsAt", "expiry"):
-        if col in df.columns:
-            date_col = col
-            break
-
-    if option == "endDate asc" and date_col:
-        return df.sort_values(date_col, ascending=True)
-    if option == "endDate desc" and date_col:
-        return df.sort_values(date_col, ascending=False)
-
-    if option == "probability asc" and "probability" in df.columns:
-        return df.sort_values("probability", ascending=True)
-    if option == "probability desc" and "probability" in df.columns:
-        return df.sort_values("probability", ascending=False)
-
-    return df
 
 
 def load_dataframe() -> pd.DataFrame:
     """Load markets into a DataFrame with computed columns."""
     markets = asyncio.run(fetch_markets())
     df = pd.DataFrame(markets)
-    if df.empty:
-        return df
-    df = add_computed_columns(df)
+    if not df.empty:
+        add_computed_columns(df)
     return df
+
+
+def apply_filters(
+    df: pd.DataFrame,
+    *,
+    search: str = "",
+    categories: Sequence[str] | None = None,
+    hide_sports: bool = False,
+    min_prob: float = 0.85,
+    min_hours: float = 6.0,
+    min_open_interest: float = 1000.0,
+) -> pd.DataFrame:
+    """Return ``df`` filtered according to the provided values."""
+
+    out = df.copy()
+
+    if hide_sports and "category" in out.columns:
+        out = out[out["category"] != "Sports"]
+
+    if categories and "category" in out.columns:
+        out = out[out["category"].isin(categories)]
+
+    if search:
+        mask_q = (
+            out["question"].astype(str).str.contains(search, case=False, na=False)
+            if "question" in out.columns
+            else pd.Series(False, index=out.index)
+        )
+        mask_s = (
+            out["slug"].astype(str).str.contains(search, case=False, na=False)
+            if "slug" in out.columns
+            else pd.Series(False, index=out.index)
+        )
+        out = out[mask_q | mask_s]
+
+    if "probability" in out.columns:
+        out = out[out["probability"] >= min_prob]
+
+    if "hoursLeft" in out.columns:
+        out = out[out["hoursLeft"] >= min_hours]
+
+    if "openInterest" in out.columns:
+        out = out[out["openInterest"] >= min_open_interest]
+
+    return out
+
+
+def sort_df(df: pd.DataFrame, key: str, ascending: bool) -> pd.DataFrame:
+    """Return ``df`` sorted by the given column if present."""
+    if key in df.columns:
+        return df.sort_values(key, ascending=ascending)
+    return df
+
+
+def add_computed_columns(df: pd.DataFrame) -> None:
+    """Add ``probability`` and ``hoursLeft`` columns to ``df`` in-place."""
+    if {"yesPrice", "noPrice"}.issubset(df.columns):
+        df["probability"] = df[["yesPrice", "noPrice"]].max(axis=1, skipna=True)
+    else:
+        df["probability"] = pd.NA
+
+    df["hoursLeft"] = df.apply(hours_left, axis=1)
 
 
 def main() -> None:
@@ -146,49 +139,53 @@ def main() -> None:
     st.title("Polymarket Markets (Read-Only)")
 
     df = load_dataframe()
-    st.write(f"Total markets loaded: {len(df)}")
+    st.write(f"Total current available markets: {len(df)}")
+    if df.empty:
+        st.info("No market data available.")
+        return
+
+    categories = []
+    if "category" in df.columns:
+        categories = sorted([c for c in df["category"].dropna().unique()])
 
     st.sidebar.header("Filters")
-    search_text = st.sidebar.text_input("Search question or slug")
-    categories = ["All"]
-    if "category" in df.columns:
-        categories += sorted(c for c in df["category"].dropna().unique())
-    selected_categories = st.sidebar.multiselect("Category", categories, default=["All"])
+    search = st.sidebar.text_input("Search")
+    selected_categories = st.sidebar.multiselect(
+        "Category", categories, default=categories
+    )
     hide_sports = st.sidebar.checkbox("Hide sports markets")
     min_prob = st.sidebar.slider("Min implied probability", 0.5, 1.0, 0.85, 0.01)
     min_hours = st.sidebar.slider("Min hours to expiry", 0, 48, 6)
     min_open_interest = st.sidebar.number_input(
         "Min openInterest USDC", value=1000, step=100
     )
-    sort_option = st.sidebar.selectbox(
-        "Sort by",
-        [
-            "24h volume",
-            "openInterest",
-            "endDate asc",
-            "endDate desc",
-            "probability asc",
-            "probability desc",
-        ],
-    )
-    if df.empty:
-        st.info("No market data available.")
-        return
 
-    df_filtered = filter_dataframe(
+    sort_map = {
+        "24h volume": ("volume24hr", False),
+        "openInterest": ("openInterest", False),
+        "endDate asc": ("endDate", True),
+        "endDate desc": ("endDate", False),
+        "probability asc": ("probability", True),
+        "probability desc": ("probability", False),
+    }
+    sort_choice = st.sidebar.selectbox("Sort by", list(sort_map.keys()))
+
+    df_filtered = apply_filters(
         df,
-        search_text,
-        selected_categories,
-        hide_sports,
-        min_prob,
-        min_hours,
-        int(min_open_interest),
+        search=search,
+        categories=selected_categories,
+        hide_sports=hide_sports,
+        min_prob=min_prob,
+        min_hours=min_hours,
+        min_open_interest=min_open_interest,
     )
-    df_filtered = sort_dataframe(df_filtered, sort_option)
+
+    sort_col, ascending = sort_map[sort_choice]
+    df_filtered = sort_df(df_filtered, sort_col, ascending)
 
     columns = [
-        c
-        for c in [
+        col
+        for col in [
             "question",
             "yesPrice",
             "noPrice",
@@ -198,7 +195,7 @@ def main() -> None:
             "volume24hr",
             "category",
         ]
-        if c in df_filtered.columns
+        if col in df_filtered.columns
     ]
     st.dataframe(df_filtered[columns])
 
