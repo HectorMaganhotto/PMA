@@ -1,39 +1,65 @@
 import unittest
+from datetime import datetime, timezone, timedelta
+
 import pandas as pd
-from app.main import filter_dataframe, hours_to_expiry
+
+from app.main import hours_to_expiry, filter_dataframe
+
 
 class FilterTests(unittest.TestCase):
-    def setUp(self):
-        self.df = pd.DataFrame([
+    def test_hours_to_expiry_missing(self) -> None:
+        market = {"endDate": None}
+        self.assertEqual(hours_to_expiry(market), -1.0)
+
+    def test_filter_sequence(self) -> None:
+        now = datetime.now(timezone.utc)
+        df = pd.DataFrame([
             {
-                "question": "A",
+                "question": "Will X happen?",
+                "slug": "x-happen",
+                "category": "Politics",
+                "yesPrice": 0.9,
+                "noPrice": 0.1,
+                "openInterest": 2000,
+                "volume24hr": 100,
+                "endDate": (now + timedelta(hours=10)).isoformat(),
+            },
+            {
+                "question": "Will Y happen?",
+                "slug": "y-happen",
+                "category": "Sports",
                 "yesPrice": 0.6,
                 "noPrice": 0.4,
                 "openInterest": 500,
-                "endDate": "2100-01-01T00:00:00Z",
+                "volume24hr": 50,
+                "endDate": (now + timedelta(hours=2)).isoformat(),
             },
             {
-                "question": "B",
-                "yesPrice": 0.4,
-                "noPrice": 0.6,
+                "question": "Will Z happen?",
+                "slug": "z-happen",
+                "category": "Politics",
+                "yesPrice": 0.7,
+                "noPrice": 0.3,
                 "openInterest": 1500,
+                "volume24hr": 10,
                 "endDate": None,
             },
         ])
-        self.df["hoursToExpiry"] = self.df.apply(hours_to_expiry, axis=1)
-        self.df["probability"] = self.df[["yesPrice", "noPrice"]].max(axis=1)
+        df["probability"] = df[["yesPrice", "noPrice"]].max(axis=1)
+        df["hoursLeft"] = df.apply(hours_to_expiry, axis=1)
 
-    def test_min_prob_filter(self):
-        result = filter_dataframe(self.df, min_prob=0.7, min_hours=0, min_open_interest=0)
-        self.assertEqual(len(result), 0)
+        result = filter_dataframe(
+            df,
+            hide_sports=True,
+            categories=["Politics"],
+            search="will x",
+            min_prob=0.8,
+            min_hours=3,
+            min_open_interest=1000,
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["slug"], "x-happen")
 
-    def test_min_hours_filter(self):
-        result = filter_dataframe(self.df, min_prob=0, min_hours=1, min_open_interest=0)
-        self.assertEqual(result["question"].tolist(), ["A"])
-
-    def test_min_open_interest_filter(self):
-        result = filter_dataframe(self.df, min_prob=0, min_hours=0, min_open_interest=1000)
-        self.assertEqual(result["question"].tolist(), ["B"])
 
 if __name__ == "__main__":
     unittest.main()
